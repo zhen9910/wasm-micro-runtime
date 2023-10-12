@@ -15,6 +15,19 @@ typedef struct ThreadArgs {
     int length;
 } ThreadArgs;
 
+typedef struct LoopThreadArgs {
+    wasm_exec_env_t exec_env;
+    char *in_buffer;
+    uint32_t in_buffer_for_wasm;
+    uint32_t in_buffer_size;
+    char *out_buffer;
+    uint32_t out_buffer_for_wasm;
+    uint32_t out_buffer_size;
+} LoopThreadArgs;
+
+void *
+call_loop_routine(void *arg);
+
 void *
 thread(void *arg)
 {
@@ -220,6 +233,83 @@ main(int argc, char *argv[])
     }
     printf("[spwan_thread]sum result: %d\n", sum);
 
+    char * in_buffer = NULL;
+    uint32_t in_buffer_for_wasm;
+    uint32_t in_buffer_len = 256;
+    char * out_buffer = NULL;
+    uint32_t out_buffer_for_wasm;
+    uint32_t out_buffer_len = 256;
+
+    in_buffer_for_wasm = wasm_runtime_module_malloc(
+                            wasm_module_inst, in_buffer_len, (void **)&in_buffer);
+    if (!in_buffer_for_wasm) {
+        printf("failed to malloc in_buffer\n");
+        goto fail5;
+    }
+    out_buffer_for_wasm = wasm_runtime_module_malloc(
+                            wasm_module_inst, out_buffer_len, (void **)&out_buffer);
+    if (!out_buffer_for_wasm) {
+        printf("failed to malloc out_buffer\n");
+        goto fail6;
+    }
+
+    // get loop function
+    func = wasm_runtime_lookup_function(wasm_module_inst, "loop", NULL);
+    if (!func) {
+        printf("failed to lookup function loop");
+        goto fail5;
+    }
+    uint32_t loop_argv[4] = {0};
+    loop_argv[0] = in_buffer_for_wasm;
+    loop_argv[1] = in_buffer_len;
+    loop_argv[2] = out_buffer_for_wasm;
+    loop_argv[3] = out_buffer_len;
+    strncpy(in_buffer, "hello from host app", 100);
+
+    /* call the WASM function from main thread */
+    if (!wasm_runtime_call_wasm(exec_env, func, 4, loop_argv)) {
+        printf("%s\n", wasm_runtime_get_exception(wasm_module_inst));
+        goto fail7;
+    }
+    printf("out_buffer: %s\n", out_buffer);
+
+    memset(in_buffer, 0, in_buffer_len);
+    memset(out_buffer, 0, out_buffer_len);
+
+    /* call the WASM funtion in a spawned thread */
+    wasm_exec_env_t new_exec_env;
+    new_exec_env = wasm_runtime_spawn_exec_env(exec_env);
+    if (!new_exec_env) {
+        printf("failed to spawn exec_env\n");
+        goto fail7;
+    }
+    strncpy(in_buffer, "hello from host app to spawned thread", 100);
+    LoopThreadArgs loop_thread_arg = {
+        .exec_env = new_exec_env,
+        .in_buffer = in_buffer,
+        .in_buffer_for_wasm = in_buffer_for_wasm,
+        .in_buffer_size = in_buffer_len,
+        .out_buffer = out_buffer,
+        .out_buffer_for_wasm = out_buffer_for_wasm,
+        .out_buffer_size = out_buffer_len,
+    };
+
+    pthread_t loop_thread_tid = 0;
+    if (0 != pthread_create(&loop_thread_tid, NULL, call_loop_routine, &loop_thread_arg)) {
+            printf("failed to create thread.\n");
+            wasm_runtime_destroy_spawned_exec_env(new_exec_env);
+            goto fail7;
+    }
+
+    wasm_runtime_join_thread(loop_thread_tid, NULL);
+    printf("out_buffer: %s\n", out_buffer);
+
+fail7:
+    wasm_runtime_module_free(wasm_module_inst, out_buffer_for_wasm);
+
+fail6:
+    wasm_runtime_module_free(wasm_module_inst, in_buffer_for_wasm);
+
 fail5:
     wasm_runtime_destroy_exec_env(exec_env);
 
@@ -239,4 +329,40 @@ fail1:
     /* destroy runtime environment */
     wasm_runtime_destroy();
     return 0;
+}
+
+void *
+call_loop_routine(void *arg)
+{
+    LoopThreadArgs *thread_arg = (LoopThreadArgs *)arg;
+    wasm_exec_env_t exec_env = thread_arg->exec_env;
+    wasm_module_inst_t module_inst = get_module_inst(exec_env);
+    wasm_function_inst_t func;
+    uint32 argv[4];
+
+    if (!wasm_runtime_init_thread_env()) {
+        printf("failed to initialize thread environment");
+        return NULL;
+    }
+
+    func = wasm_runtime_lookup_function(module_inst, "loop", NULL);
+    if (!func) {
+        printf("failed to lookup function sum");
+        wasm_runtime_destroy_thread_env();
+        return NULL;
+    }
+    argv[0] = thread_arg->in_buffer_for_wasm;
+    argv[1] = thread_arg->in_buffer_size;
+    argv[2] = thread_arg->out_buffer_for_wasm;
+    argv[3] = thread_arg->out_buffer_size;
+
+    /* call the WASM function */
+    if (!wasm_runtime_call_wasm(exec_env, func, 4, argv)) {
+        printf("%s\n", wasm_runtime_get_exception(module_inst));
+        wasm_runtime_destroy_thread_env();
+        return NULL;
+    }
+
+    wasm_runtime_destroy_thread_env();
+    return NULL;
 }
