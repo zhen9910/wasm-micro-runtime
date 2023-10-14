@@ -39,6 +39,7 @@ float_to_string(float n, char *res, int res_size, int afterpoint)
 {
 
     printf("calling into WASM function: %s\n", __FUNCTION__);
+    printf("[%s]: n = %f, res_size = %d, afterpoint = %d\n", __FUNCTION__, n, res_size, afterpoint);
 
     // Extract integer part
     int ipart = (int)n;
@@ -60,6 +61,7 @@ float_to_string(float n, char *res, int res_size, int afterpoint)
 
         intToStr((int)fpart, res + i + 1, sizeof(res + i + 1), afterpoint);
     }
+    printf("res = %s", res);
 }
 
 int32_t

@@ -7,6 +7,14 @@
 #include "wasm_export.h"
 #include "bh_read_file.h"
 #include "bh_getopt.h"
+#include "pthread.h"
+
+typedef struct ThreadArgs {
+    wasm_exec_env_t exec_env;
+    uint32_t wasm_buffer;
+    uint32_t buffer_size;
+    char *native_buffer;
+} ThreadArgs;
 
 int
 intToStr(int x, char *str, int str_len, int digit);
@@ -20,6 +28,59 @@ print_usage(void)
 {
     fprintf(stdout, "Options:\r\n");
     fprintf(stdout, "  -f [path of wasm file] \n");
+}
+
+void *
+call_loop_routine(void *arg)
+{
+    ThreadArgs *thread_arg = (ThreadArgs *)arg;
+    wasm_exec_env_t exec_env = thread_arg->exec_env;
+    wasm_module_inst_t module_inst = get_module_inst(exec_env);
+    wasm_function_inst_t func;
+    uint32 argv[4];
+
+    if (!wasm_runtime_init_thread_env()) {
+        printf("failed to initialize thread environment");
+        return NULL;
+    }
+
+    func = wasm_runtime_lookup_function(module_inst, "float_to_string", NULL);
+    if (!func) {
+        printf("failed to lookup function float_to_string");
+        wasm_runtime_destroy_thread_env();
+        return NULL;
+    }
+
+    float ret_val = 102009.921875;
+    memcpy(argv, &ret_val, sizeof(float)); // the first argument
+    argv[1] = thread_arg->wasm_buffer; // the second argument is the wasm buffer address
+    argv[2] = thread_arg->buffer_size; //  the third argument is the wasm buffer size
+    argv[3] = 3; //  the last argument is the digits after decimal point for
+                  //  converting float to string
+
+    /* call the WASM function */
+    printf("[%s]: call wasm function float_to_string\n", __FUNCTION__);
+    // if (wasm_runtime_call_wasm(exec_env, func, 4, argv)) {
+    //     printf("%s\n", wasm_runtime_get_exception(module_inst));
+    //     goto exit;
+    // }
+
+    if (wasm_runtime_call_wasm(exec_env, func, 4, argv)) {
+        printf("Native finished calling wasm function: float_to_string, "
+               "returned a formatted string: %s\n",
+               thread_arg->native_buffer);
+    }
+    else {
+        printf("call wasm function float_to_string failed. error: %s\n",
+               wasm_runtime_get_exception(module_inst));
+        goto exit;
+    }
+
+    printf("[%s]: call wasm function float_to_string done\n", __FUNCTION__);
+exit:
+    wasm_runtime_destroy_thread_env();
+    pthread_exit(NULL);
+    return NULL;
 }
 
 int
@@ -157,48 +218,77 @@ main(int argc, char *argv_main[])
     wasm_buffer =
         wasm_runtime_module_malloc(module_inst, 100, (void **)&native_buffer);
 
-    memcpy(argv2, &ret_val, sizeof(float)); // the first argument
-    argv2[1] = wasm_buffer; // the second argument is the wasm buffer address
-    argv2[2] = 100;         //  the third argument is the wasm buffer size
-    argv2[3] = 3; //  the last argument is the digits after decimal point for
-                  //  converting float to string
+    // memcpy(argv2, &ret_val, sizeof(float)); // the first argument
+    // argv2[1] = wasm_buffer; // the second argument is the wasm buffer address
+    // argv2[2] = 100;         //  the third argument is the wasm buffer size
+    // argv2[3] = 3; //  the last argument is the digits after decimal point for
+    //               //  converting float to string
 
-    if (!(func2 = wasm_runtime_lookup_function(module_inst, "float_to_string",
-                                               NULL))) {
-        printf(
-            "The wasm function float_to_string wasm function is not found.\n");
+    // if (!(func2 = wasm_runtime_lookup_function(module_inst, "float_to_string",
+    //                                            NULL))) {
+    //     printf(
+    //         "The wasm function float_to_string wasm function is not found.\n");
+    //     goto fail;
+    // }
+
+    // if (wasm_runtime_call_wasm(exec_env, func2, 4, argv2)) {
+    //     printf("Native finished calling wasm function: float_to_string, "
+    //            "returned a formatted string: %s\n",
+    //            native_buffer);
+    // }
+    // else {
+    //     printf("call wasm function float_to_string failed. error: %s\n",
+    //            wasm_runtime_get_exception(module_inst));
+    //     goto fail;
+    // }
+
+    // wasm_function_inst_t func3 =
+    //     wasm_runtime_lookup_function(module_inst, "calculate", NULL);
+    // if (!func3) {
+    //     printf("The wasm function calculate is not found.\n");
+    //     goto fail;
+    // }
+
+    // uint32_t argv3[1] = { 3 };
+    // if (wasm_runtime_call_wasm(exec_env, func3, 1, argv3)) {
+    //     uint32_t result = *(uint32_t *)argv3;
+    //     printf("Native finished calling wasm function: calculate, return: %d\n",
+    //            result);
+    // }
+    // else {
+    //     printf("call wasm function calculate failed. error: %s\n",
+    //            wasm_runtime_get_exception(module_inst));
+    //     goto fail;
+    // }
+
+    //===============================================
+    //===============================================
+    /* call the WASM funtion in a spawned thread */
+    printf("\n\n\n\ncall from a spawned thread\n");
+    wasm_exec_env_t new_exec_env;
+    new_exec_env = wasm_runtime_spawn_exec_env(exec_env);
+    if (!new_exec_env) {
+        printf("failed to spawn exec_env\n");
         goto fail;
     }
+    printf("spawned exec_env created, wasm_buffer = %d\n", wasm_buffer);
+    ThreadArgs loop_thread_arg = {
+        .exec_env = new_exec_env,
+        .wasm_buffer = wasm_buffer,
+        .buffer_size = 100,
+        .native_buffer = native_buffer,
+    };
 
-    if (wasm_runtime_call_wasm(exec_env, func2, 4, argv2)) {
-        printf("Native finished calling wasm function: float_to_string, "
-               "returned a formatted string: %s\n",
-               native_buffer);
-    }
-    else {
-        printf("call wasm function float_to_string failed. error: %s\n",
-               wasm_runtime_get_exception(module_inst));
-        goto fail;
-    }
-
-    wasm_function_inst_t func3 =
-        wasm_runtime_lookup_function(module_inst, "calculate", NULL);
-    if (!func3) {
-        printf("The wasm function calculate is not found.\n");
-        goto fail;
+    pthread_t loop_thread_tid = 0;
+    if (0 != pthread_create(&loop_thread_tid, NULL, call_loop_routine, &loop_thread_arg)) {
+            printf("failed to create thread.\n");
+            wasm_runtime_destroy_spawned_exec_env(new_exec_env);
+            goto fail;
     }
 
-    uint32_t argv3[1] = { 3 };
-    if (wasm_runtime_call_wasm(exec_env, func3, 1, argv3)) {
-        uint32_t result = *(uint32_t *)argv3;
-        printf("Native finished calling wasm function: calculate, return: %d\n",
-               result);
-    }
-    else {
-        printf("call wasm function calculate failed. error: %s\n",
-               wasm_runtime_get_exception(module_inst));
-        goto fail;
-    }
+    wasm_runtime_join_thread(loop_thread_tid, NULL);
+    printf("thread joined\n");
+    printf("native_buffer = %s\n", native_buffer);
 
 fail:
     if (exec_env)

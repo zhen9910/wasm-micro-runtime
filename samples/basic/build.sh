@@ -43,13 +43,16 @@ OUT_FILE=${i%.*}.wasm
 
 # use WAMR SDK to build out the .wasm binary
 /opt/wasi-sdk/bin/clang     \
-        --target=wasm32 -O0 -z stack-size=4096 -Wl,--initial-memory=65536 \
+        --target=wasm32 -O0 -z stack-size=32768 -Wl,--initial-memory=65536 \
         --sysroot=${WAMR_DIR}/wamr-sdk/app/libc-builtin-sysroot  \
         -Wl,--allow-undefined-file=${WAMR_DIR}/wamr-sdk/app/libc-builtin-sysroot/share/defined-symbols.txt \
-        -Wl,--strip-all,--no-entry -nostdlib \
+        -Wl,--strip-all,--no-entry -nostdlib -pthread \
+        -Wl,--shared-memory,--max-memory=131072      \
         -Wl,--export=generate_float \
         -Wl,--export=float_to_string \
         -Wl,--export=calculate\
+        -Wl,--export=__heap_base,--export=__data_end    \
+        -Wl,--export=__wasm_call_ctors  \
         -Wl,--allow-undefined \
         -o ${OUT_DIR}/wasm-apps/${OUT_FILE} ${APP_SRC}
 
