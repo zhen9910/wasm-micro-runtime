@@ -1,0 +1,116 @@
+From e1f9f8b58a66064f1ff07bdd998dde9cab98fa06 Mon Sep 17 00:00:00 2001
+From: Zhen Kong <zhkon@microsoft.com>
+Date: Mon, 10 Mar 2025 02:18:19 +0000
+Subject: [PATCH] update wasi-nn dockerfile
+
+---
+ .../libraries/wasi-nn/test/Dockerfile.compile    |  2 +-
+ core/iwasm/libraries/wasi-nn/test/Dockerfile.cpu |  8 +++++++-
+ .../wasi-nn/test/Dockerfile.wasi-nn-smoke        | 16 ++++++++--------
+ .../libraries/wasi-nn/test/requirements.txt      |  2 +-
+ 4 files changed, 17 insertions(+), 11 deletions(-)
+
+diff --git a/core/iwasm/libraries/wasi-nn/test/Dockerfile.compile b/core/iwasm/libraries/wasi-nn/test/Dockerfile.compile
+index b20d0111..a7497137 100644
+--- a/core/iwasm/libraries/wasi-nn/test/Dockerfile.compile
++++ b/core/iwasm/libraries/wasi-nn/test/Dockerfile.compile
+@@ -1,7 +1,7 @@
+ # Copyright (C) 2019 Intel Corporation.  All rights reserved.
+ # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+ 
+-FROM ubuntu:20.04
++FROM ubuntu:22.04
+ 
+ ENV DEBIAN_FRONTEND=noninteractive
+ 
+diff --git a/core/iwasm/libraries/wasi-nn/test/Dockerfile.cpu b/core/iwasm/libraries/wasi-nn/test/Dockerfile.cpu
+index 67bfbfe0..bc83f610 100644
+--- a/core/iwasm/libraries/wasi-nn/test/Dockerfile.cpu
++++ b/core/iwasm/libraries/wasi-nn/test/Dockerfile.cpu
+@@ -1,7 +1,7 @@
+ # Copyright (C) 2019 Intel Corporation.  All rights reserved.
+ # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+ 
+-FROM ubuntu:20.04 AS base
++FROM ubuntu:22.04 AS base
+ 
+ ENV DEBIAN_FRONTEND=noninteractive
+ 
+@@ -17,6 +17,12 @@ RUN wget -qP /usr/local/share/ca-certificates/cacert.org http://www.cacert.org/c
+ # need a newer cmake
+ RUN apt-get purge -y cmake
+ 
++#RUN apt-get update && apt-get install gcc-11 g++-11 \
++#  && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 \
++#  && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 110 \
++#  && update-alternatives --set gcc /usr/bin/gcc-11 \
++#  && update-alternatives --set g++ /usr/bin/g++-11
++
+ ARG CMAKE_VER=3.27.0
+ RUN wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VER}/cmake-${CMAKE_VER}-Linux-x86_64.sh \
+   -q -O /tmp/cmake-install.sh \
+diff --git a/core/iwasm/libraries/wasi-nn/test/Dockerfile.wasi-nn-smoke b/core/iwasm/libraries/wasi-nn/test/Dockerfile.wasi-nn-smoke
+index fe3a8c51..0ea42209 100644
+--- a/core/iwasm/libraries/wasi-nn/test/Dockerfile.wasi-nn-smoke
++++ b/core/iwasm/libraries/wasi-nn/test/Dockerfile.wasi-nn-smoke
+@@ -25,24 +25,26 @@ RUN rustup target add wasm32-wasi
+ RUN wget -q https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
+ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ RUN apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+-  && echo "deb https://apt.repos.intel.com/openvino/2023 ubuntu20 main" | tee /etc/apt/sources.list.d/intel-openvino-2023.list
++  && echo "deb https://apt.repos.intel.com/openvino/2024 ubuntu20 main" | tee /etc/apt/sources.list.d/intel-openvino-2023.list
+ RUN apt-get update \
+   && apt-get upgrade -y \
+-  && apt-get install --no-install-recommends -y openvino-2023.2.0
++  && apt-get install --no-install-recommends -y openvino-2024.2.0
+ 
+ #
+ # wasi-nn
+ # compilation requirements
+ WORKDIR /workspaces/wasi-nn
+-RUN git clone --depth 1 https://github.com/bytecodealliance/wasi-nn.git .
++#RUN git clone --depth 1 https://github.com/bytecodealliance/wasi-nn.git .
++RUN git clone https://github.com/bytecodealliance/wasi-nn.git .
++RUN git checkout -b 556890b1 556890b1
+ 
+ WORKDIR /workspaces/wasi-nn/rust/examples/classification-example/
+ RUN cargo build --target=wasm32-wasi
+ 
+ WORKDIR /workspaces/wasi-nn/rust/examples/classification-example/build
+ RUN cp ../target/wasm32-wasi/debug/wasi-nn-example.wasm . \
+-  && wget -q --no-clobber https://github.com/intel/openvino-rs/raw/main/crates/openvino/tests/fixtures/mobilenet/mobilenet.xml \
+-  && wget -q --no-clobber https://github.com/intel/openvino-rs/raw/main/crates/openvino/tests/fixtures/mobilenet/mobilenet.bin
++  && wget https://download.01.org/openvinotoolkit/fixtures/mobilenet/mobilenet.bin \
++  && wget https://download.01.org/openvinotoolkit/fixtures/mobilenet/mobilenet.xml
+ # There are model files(mobilenet*) and wasm files(wasi-nn-example.wasm) in the directory,
+ # /workspaces/wasi-nn/rust/examples/classification-example/build
+ 
+@@ -61,8 +63,6 @@ ENV PATH=/opt/wasmedge/bin:${PATH}
+ # wasmedge-wasinn-examples
+ WORKDIR /workspaces/wasmedge-wasinn-examples
+ RUN git clone --depth 1 https://github.com/second-state/WasmEdge-WASINN-examples.git .
+-COPY core/iwasm/libraries/wasi-nn/test/bump_wasi_nn_to_0_6_0.patch .
+-RUN git apply ./bump_wasi_nn_to_0_6_0.patch
+ 
+ # recompile with wasi-nn 0.6.0
+ WORKDIR /workspaces/wasmedge-wasinn-examples/openvino-mobilenet-image/
+@@ -99,7 +99,7 @@ COPY . .
+ 
+ WORKDIR /workspaces/wamr/product-mini/platforms/linux
+ 
+-RUN OpenVINO_DIR=/usr/lib/openvino-2023.2.0 \
++RUN OpenVINO_DIR=/usr/lib/openvino-2024.2.0 \
+     cmake -S . -B build \
+     -DWAMR_BUILD_WASI_NN=1 -DWAMR_BUILD_WASI_EPHEMERAL_NN=1 \
+     -DWAMR_BUILD_WASI_NN_OPENVINO=1 \
+diff --git a/core/iwasm/libraries/wasi-nn/test/requirements.txt b/core/iwasm/libraries/wasi-nn/test/requirements.txt
+index 1643b91b..7c83ad70 100644
+--- a/core/iwasm/libraries/wasi-nn/test/requirements.txt
++++ b/core/iwasm/libraries/wasi-nn/test/requirements.txt
+@@ -1,2 +1,2 @@
+ tensorflow==2.12.1
+-numpy==1.24.4
++numpy==1.24.3
+-- 
+2.43.0
+
